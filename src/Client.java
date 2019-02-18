@@ -17,8 +17,8 @@ public class Client {
 		    FEInterface stub = (FEInterface) registry.lookup("FE");
 
 		    // Invoke a remote method
-		    String response = stub.testRemote();
-		    System.out.println("response: " + response);
+		    //String response = stub.testRemote();
+		    //System.out.println("response: " + response);
 
 		} catch (Exception e) {
 			System.err.println("Client exception: " + e.toString());

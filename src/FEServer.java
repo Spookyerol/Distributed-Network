@@ -6,10 +6,6 @@ public class FEServer implements FEInterface {
 	
 	public FEServer() {}
 	
-	public String testRemote() {
-		return "Remote connection established.";
-	}
-	
 	public static void main(String args[]) {
 		
 		try {
@@ -31,7 +27,7 @@ public class FEServer implements FEInterface {
 		    System.err.println("Server exception: " + e.toString());
 		    e.printStackTrace();
 		}
-	    }
+	}
 }
 
 // rmiregistry <port number> on cmd before attempting to run.

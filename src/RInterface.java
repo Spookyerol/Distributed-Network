@@ -1,6 +1,6 @@
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 
-public interface FEInterface extends Remote {
-	
+public interface RInterface extends Remote {
+
 }
