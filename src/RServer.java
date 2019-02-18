@@ -21,10 +21,14 @@ public class RServer implements RInterface {
 	private HashMap<String, String> ratingsSet;
 	private String state;
 	
-	private static int noServers;
+	private static int noServers = 0;
 	
 	public RServer() {
-		noServers ++;
+		movieSet = new HashMap<String, ArrayList<String>>();
+		state = "OK";
+		noServers++;
+		readMovieFile("movies.csv", "movie");
+		System.err.println(movieSet.get("Toy Story (1995)"));
 	}
 	
 	public static void main(String args[]) {
@@ -51,16 +55,16 @@ public class RServer implements RInterface {
 		}
 	}
 	
-	public void readMovieFile(String fileName) {
-		Path pathToFile = Paths.get(fileName);
+	public void readMovieFile(String fileName, String type) {
+		String path = "../ml-latest-small/" + fileName;
+		Path pathToFile = Paths.get(path);
 		
 		try (BufferedReader br = Files.newBufferedReader(pathToFile, StandardCharsets.UTF_8)) {
 			
 			String line = br.readLine();
 			line = br.readLine(); //first line are just the column names so we skip
 			while (line != null) {
-				String[] attr = line.split(",");
-				addMovieEntry(attr);
+				addMovieEntry(line);
 				line = br.readLine();
 			}
 			
@@ -69,11 +73,15 @@ public class RServer implements RInterface {
 		}
 	}
 	
-	public void addMovieEntry(String[] attr) {
+	public void addMovieEntry(String line) {
+		int i = line.indexOf(",");
+		int j = line.lastIndexOf(",");
+		String[] attr = {line.substring(0, i), line.substring(i+1, j), line.substring(j+1)};
 		ArrayList<String> data = new ArrayList<>();
 		data.add(attr[0]);
 		data.add(attr[2]);
-		this.movieSet.put(attr[0], data);
+		this.movieSet.put(attr[1], data);
+		System.out.println(movieSet.get(attr[1]));
 	}
 }
 
