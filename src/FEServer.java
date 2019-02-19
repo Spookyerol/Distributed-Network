@@ -4,6 +4,8 @@ import java.rmi.server.UnicastRemoteObject;
 
 public class FEServer implements FEInterface {
 	
+	private static RInterface replicant;
+	
 	public FEServer() {}
 	
 	public static void main(String args[]) {
@@ -20,13 +22,26 @@ public class FEServer implements FEInterface {
 
 		    // Bind the remote object's stub in the registry
 		    registry.bind("FE", stub);
-
+		    
+		    Registry repRegistry = LocateRegistry.getRegistry("127.0.0.1", 10000);
+		    replicant = (RInterface) repRegistry.lookup("R1");
+		    
 		    // Write ready message to console
 		    System.err.println("Server ready");
 		} catch (Exception e) {
 		    System.err.println("Server exception: " + e.toString());
 		    e.printStackTrace();
 		}
+	}
+	
+	public String getRating(int userID, int movieID) {
+		try {
+			return replicant.getRating(userID, movieID);
+		} catch (Exception e) {
+			System.err.println("Replicant exception: " + e.toString());
+		    e.printStackTrace();
+		}
+		return null;
 	}
 }
 
