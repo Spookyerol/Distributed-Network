@@ -21,46 +21,41 @@ import java.nio.file.Paths;
 public class RServer implements RInterface {
 	
 	private HashMap<Integer, ArrayList<String>> movieMap; //movieID, (title, genres)
-	private HashMap<List<Integer>, ArrayList<String>> ratingsMap; //(userID, movieID), (rating, time stamp)
-	//private HashMap<String, ArrayList<String>> linkMap; //movieID, (imdbID, tmdbID)
-	//private ArrayList<ArrayList<String>> tagList; //userID, movieID, tag, time stamp
-	//private Status state;
+	private HashMap<List<Integer>, List<String>> ratingsMap; //(userID, movieID), (rating, time stamp)
+	private int[] vectorStamp; //each cell points to a replicant that is in the network by index, the number in the cell represents the number of updates that this server thinks the corresponding replicants have
+	private int id; //this index points to the cell in vectorStamp that corresponds to this object/server
 	
 	private static int noServers = 0;
-	private static RServer[] replicants; 
+	private static String[] replicants; 
 	
-	public RServer() {
+	public RServer(int networkSize) {
 		movieMap = new HashMap<Integer, ArrayList<String>>();
-		ratingsMap = new HashMap<List<Integer>, ArrayList<String>>();
-		//linkMap = new HashMap<String, ArrayList<String>>();
-		//tagList = new ArrayList<ArrayList<String>>();
-		//state = Status.OK;
+		ratingsMap = new HashMap<List<Integer>, List<String>>();
+		id = noServers - 1;
+		vectorStamp = new int[networkSize];
 		readFile("movies.csv", "movie");
 		readFile("ratings.csv", "ratings");
-		//readFile("links.csv", "links");
-		//readFile("tags.csv", "tags");
 	}
 	
 	public static void main(String args[]) {
 		
 		try {
 			int networkSize = Integer.valueOf(args[0]);
-			RServer[] servers = new RServer[networkSize];
+			String[] servers = new String[networkSize];
+			
+		    // Get registry
+		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 			for(int i = 0;i < networkSize;i++) {
 				noServers++;
 			    // Create server object
-			    RServer obj = new RServer();
-			    servers[i] = obj;
+			    RServer obj = new RServer(networkSize);
 			    // Create remote object stub from server object
 			    RInterface stub = (RInterface) UnicastRemoteObject.exportObject(obj, 0);
-	
-			    // Get registry
-			    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);// * noServers);
 	
 			    // Bind the remote object's stub in the registry
 			    String binding = "R" + Integer.toString(noServers);
 			    registry.bind(binding, stub);
-			    
+			    servers[i] = binding;
 			    // Write ready message to console
 			    System.err.println("Replicant " + binding + " ready at port " + Integer.toString(10000));
 			}
@@ -86,12 +81,6 @@ public class RServer implements RInterface {
 				else if(type.equals("ratings")) {
 					addRatingsEntry(line);
 				}
-				else if(type.equals("links")) {
-					addLinksEntry(line);
-				}
-				else { //"tags"
-					addTagEntry(line);
-				}
 				
 				line = br.readLine();
 			}
@@ -113,45 +102,79 @@ public class RServer implements RInterface {
 	
 	public void addRatingsEntry(String line) {
 		String[] attr = line.split(",");
-		ArrayList<String> data = new ArrayList<>();
 		int userID = Integer.valueOf(attr[0]);
 		int movieID = Integer.valueOf(attr[1]);
-		data.add(attr[2]);
-		data.add(attr[3]);
-		this.ratingsMap.put(Collections.unmodifiableList(Arrays.asList(userID, movieID)), data);
+		this.ratingsMap.put(Collections.unmodifiableList(Arrays.asList(userID, movieID)), Collections.unmodifiableList(Arrays.asList(attr[2], attr[3])));
 	}
 	
-	public void addLinksEntry(String line) {
-		String[] attr = line.split(",");
-		ArrayList<String> data = new ArrayList<>();
-		data.add(attr[1]);
-		data.add(attr[2]);
-		//this.linkMap.put(attr[0], data);
+	public boolean checkForUpdates(int counter, int otherId) {
+		if(this.vectorStamp[otherId] < counter) { //this means that the other replicant has more updates than this server expected, this trusts that the last used replica is up to date with all other replicas - since it served the previous request
+		//note that this replicant could still have updates that the other one does not posess yet
+			this.vectorStamp[otherId] = counter;
+			return true; //need updates
+		}
+		else {
+			return false; //no updates found
+		}
 	}
 	
-	public void addTagEntry(String line) {
-		String[] attr = line.split(",");
-		ArrayList<String> data = new ArrayList<>();
-		data.add(attr[0]);
-		data.add(attr[1]);
-		data.add(attr[2]);
-		data.add(attr[3]);
-		//this.tagList.add(data);
-	}
-	
-	public String getRating(int userID, int movieID) {
+	public void applyAvailableUpdates(String[] checkVector) {
 		try {
+			boolean update = false;
+			if(!checkVector[0].equals("FE")) {
+				int otherId = Integer.valueOf(checkVector[0].substring(1)) - 1; //retrieves the id of the other replicant by separating out the 'R' from the numerical part
+				update = checkForUpdates(Integer.valueOf(checkVector[1]), otherId);
+			}
+			if(update) {
+				Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
+				RInterface replicant = (RInterface) registry.lookup(checkVector[0]);
+				while(replicant.getStatus() == Status.OFFLINE) { //since updating like this is high priority we still go through even if the server is overloaded
+					wait(1); //We have to wait until the server is back up again
+				}
+				HashMap<List<Integer>, List<String>> otherMap = replicant.getRatings();
+				for (Map.Entry<List<Integer>, List<String>> entry : otherMap.entrySet()) {
+					if(this.ratingsMap.get(entry.getKey()) == null) { //there is an additional entry that must be added
+						this.ratingsMap.put(entry.getKey(), entry.getValue());
+						this.vectorStamp[id] = vectorStamp[id] + 1;
+					}
+					else if(this.ratingsMap.get(entry.getKey()) != entry.getValue()) { //a data point has been modified
+						List<String> valuesSelf = this.ratingsMap.get(entry.getKey());
+						long timeStampSelf = Long.parseLong(valuesSelf.get(1));
+						//check to see which copy of data was most recently changed
+						if(timeStampSelf < Long.parseLong(entry.getValue().get(1))) { //the other replicant has more recent data so we update
+							this.ratingsMap.put(entry.getKey(), entry.getValue());
+							this.vectorStamp[id] = vectorStamp[id] + 1;
+						}
+						//else we keep our copy of the data
+					}
+				}
+			}
+		} catch (Exception e) {
+		    System.err.println("Replicant exception: " + e.toString());
+		    e.printStackTrace();
+		}
+	}
+	
+	public String[] getRating(int userID, int movieID, String[] checkVector) {
+		try {
+			applyAvailableUpdates(checkVector);
 			ArrayList<String> movieData = movieMap.get(movieID);
 			if(movieData == null) {
-				return "Error:Specified movie does not exist.";
+				String msg = "Error:Specified movie does not exist.";
+				String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+				return response;
 			}
 			else {
-				ArrayList<String> rating = ratingsMap.get(Arrays.asList(userID, movieID));
+				List<String> rating = ratingsMap.get(Arrays.asList(userID, movieID));
 				if(rating == null) {
-					return "Error:This rating does not exist.";
+					String msg = "Error:This rating does not exist.";
+					String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+					return response;
 				}
 				else {
-					return "Rating by " + Integer.toString(userID) + " for " + movieData.get(0) + " is " + rating.get(0) + " at time " + rating.get(1);
+					String msg = "Rating by " + Integer.toString(userID) + " for " + movieData.get(0) + " is " + rating.get(0) + " at time " + rating.get(1);
+					String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+					return response;
 				}
 			}
 		} catch (Exception e) {
@@ -161,15 +184,18 @@ public class RServer implements RInterface {
 		return null;
 	}
 	
-	public String submitRating(int userID, int movieID, String score) {
+	public String[] submitRating(int userID, int movieID, String score, String[] checkVector) {
 		try {
+			applyAvailableUpdates(checkVector);
 			ArrayList<String> movieData = movieMap.get(movieID);
 			if(movieData == null) {
-				return "Error:Specified movie does not exist.";
+				String msg = "Error:Specified movie does not exist.";
+				String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+				return response;
 			}
 			else {
 				boolean update = true;
-				ArrayList<String> rating = ratingsMap.get(Arrays.asList(userID, movieID));
+				List<String> rating = ratingsMap.get(Arrays.asList(userID, movieID));
 				if(rating == null) {
 					update = false;
 				}
@@ -180,12 +206,16 @@ public class RServer implements RInterface {
 				String time = String.valueOf(timeStamp);
 				data.add(time);
 				ratingsMap.put(Collections.unmodifiableList(Arrays.asList(userID, movieID)), data);
+				String msg;
 				if(!update) {
-					return "New rating by " + Integer.toString(userID) + " submitted for " + movieData.get(0) + " with score " + score + " at time " + time;
+					msg = "New rating by " + Integer.toString(userID) + " submitted for " + movieData.get(0) + " with score " + score + " at time " + time;
 				}
 				else {
-					return "Existing rating for " + movieData.get(0) + " by " + Integer.toString(userID) + " updated to score " + score + " at time " + time;
+					msg = "Existing rating for " + movieData.get(0) + " by " + Integer.toString(userID) + " updated to score " + score + " at time " + time;
 				}
+				this.vectorStamp[id] = vectorStamp[id] + 1;
+				String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+				return response;
 			}
 		} catch (Exception e) {
 			System.err.println("Replicant exception: " + e.toString());
@@ -197,16 +227,21 @@ public class RServer implements RInterface {
 	public Status getStatus() {
 		Status status = Status.OK;
 		double p = Math.random();
-		if(p < 0.3) {
-			status = Status.BUSY;
-		}
-		if(p < 0.1) {
-			status = Status.OVERLOADED;
-		}
 		if(p < 0.05) {
 			status = Status.OFFLINE;
 		}
+		else if(p < 0.3) {
+			status = Status.OVERLOADED;
+		}
 		return status;
+	}
+	
+	public HashMap<List<Integer>, List<String>> getRatings() {
+		return this.ratingsMap;
+	}
+	
+	public int getID() {
+		return this.id;
 	}
 }
 

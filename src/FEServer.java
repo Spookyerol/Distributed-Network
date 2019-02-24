@@ -8,9 +8,14 @@ import java.util.Random;
 
 public class FEServer implements FEInterface {
 	
-	private static RInterface replicant; //Replicant we last made a connection with
+	private int latestVector;
+	private String replicant; //Replicant we last made a connection with
 	
-	public FEServer() {}
+	
+	public FEServer() {
+		latestVector = 0;
+		replicant = "FE"; 
+	}
 	
 	public static void main(String args[]) {
 		
@@ -22,13 +27,10 @@ public class FEServer implements FEInterface {
 		    FEInterface stub = (FEInterface) UnicastRemoteObject.exportObject(obj, 0);
 
 		    // Get registry
-		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 3000);
+		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 
 		    // Bind the remote object's stub in the registry
 		    registry.bind("FE", stub);
-		    
-		    Registry repRegistry = LocateRegistry.getRegistry("127.0.0.1", 10000);
-		    replicant = (RInterface) repRegistry.lookup("R1");
 		    
 		    // Write ready message to console
 		    System.err.println("Server ready");
@@ -38,26 +40,30 @@ public class FEServer implements FEInterface {
 		}
 	}
 	
-	public String connectToReplicant() {
+	public RInterface connectToReplicant() {
 		try {
 			Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 			String[] replicants = registry.list();
 			Random rand = new Random();
-			int randInt = rand.nextInt(replicants.length);
+			int randInt = rand.nextInt(replicants.length - 1) + 1;
 			String binding = replicants[randInt];
-			replicant = (RInterface) registry.lookup(binding);
+			//this.replicant = binding;
+			RInterface replicant = (RInterface) registry.lookup(binding);
 			Status availability = replicant.getStatus();
 			while(availability != Status.OK) {
 				System.err.println("Replicant " + binding + " " + availability.name().toLowerCase());
 				while(replicants[randInt] == binding) {
-					randInt = rand.nextInt(replicants.length);
+					randInt = rand.nextInt(replicants.length - 1) + 1;
 				}
 				binding = replicants[randInt];
+				//this.replicant = binding;
+				System.err.println(binding);
 				replicant = (RInterface) registry.lookup(binding);
 				availability = replicant.getStatus();
 			}
 			System.err.println("Replicant " + binding + " " + availability.name().toLowerCase());
-			return replicants[randInt];
+			System.out.println("Serving request from " + binding);
+			return replicant;
 		} catch (Exception e) {
 		    System.err.println("Server exception: " + e.toString());
 		    e.printStackTrace();
@@ -67,9 +73,13 @@ public class FEServer implements FEInterface {
 	
 	public String getRating(int userID, int movieID) {
 		try {
-			String connection = connectToReplicant();
-			System.out.println("Serving request from " + connection);
-			return replicant.getRating(userID, movieID);
+			RInterface connection = connectToReplicant();
+			System.err.println("Last served request from " + replicant);
+			String[] vectorStamp = {replicant, Integer.toString(latestVector)};
+			String[] response = connection.getRating(userID, movieID, vectorStamp);
+			latestVector = Integer.valueOf(response[1]);
+			this.replicant = response[2];
+			return response[0];
 		} catch (Exception e) {
 			System.err.println("Replicant exception: " + e.toString());
 		    e.printStackTrace();
@@ -79,9 +89,13 @@ public class FEServer implements FEInterface {
 	
 	public String submitRating(int userID, int movieID, String score) {
 		try {
-			String connection = connectToReplicant();
-			System.out.println("Serving request from " + connection);
-			return replicant.submitRating(userID, movieID, score);
+			RInterface connection = connectToReplicant();
+			System.err.println("Last served request from " + replicant);
+			String[] vectorStamp = {replicant, Integer.toString(latestVector)};
+			String[] response = connection.submitRating(userID, movieID, score, vectorStamp);
+			latestVector = Integer.valueOf(response[1]);
+			this.replicant = response[2];
+			return response[0];
 		} catch (Exception e) {
 			System.err.println("Replicant exception: " + e.toString());
 		    e.printStackTrace();

@@ -12,7 +12,7 @@ public class Client {
 		try {
 
 		    // Get registry
-		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 3000);
+		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 
 		    // Create a stub
 		    FEInterface stub = (FEInterface) registry.lookup("FE");
