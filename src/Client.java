@@ -7,10 +7,11 @@ public class Client {
 	
 	public Client() {}
 	
-	public static void main(String[] args) {
-		String host = (args.length < 1) ? null : args[0];
+	public static void main(String args[]) {
 		try {
-
+			// Since client is useless without a front end to connect to we make one
+			FEServer.main(args);
+			
 		    // Get registry
 		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 
@@ -43,6 +44,7 @@ public class Client {
 		    	}
 		    	else if(inp.toLowerCase().equals("exit")) {
 		    		System.err.println("Shutting down...");
+		    		stub.terminate(registry);
 		    		break;
 		    	}
 		    	else {

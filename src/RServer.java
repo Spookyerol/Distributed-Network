@@ -24,14 +24,11 @@ public class RServer implements RInterface {
 	private HashMap<List<Integer>, List<String>> ratingsMap; //(userID, movieID), (rating, time stamp)
 	private int[] vectorStamp; //each cell points to a replicant that is in the network by index, the number in the cell represents the number of updates that this server thinks the corresponding replicants have
 	private int id; //this index points to the cell in vectorStamp that corresponds to this object/server
-	
-	private static int noServers = 0;
-	private static String[] replicants; 
+	private String[] bindingList;
 	
 	public RServer(int networkSize) {
 		movieMap = new HashMap<Integer, ArrayList<String>>();
 		ratingsMap = new HashMap<List<Integer>, List<String>>();
-		id = noServers - 1;
 		vectorStamp = new int[networkSize];
 		readFile("movies.csv", "movie");
 		readFile("ratings.csv", "ratings");
@@ -41,29 +38,74 @@ public class RServer implements RInterface {
 		
 		try {
 			int networkSize = Integer.valueOf(args[0]);
-			String[] servers = new String[networkSize];
+			String[] bindings = new String[networkSize];
+			RServer[] servers = new RServer[networkSize];
 			
 		    // Get registry
 		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 			for(int i = 0;i < networkSize;i++) {
-				noServers++;
+				
 			    // Create server object
 			    RServer obj = new RServer(networkSize);
+			    servers[i] = obj;
+			    
 			    // Create remote object stub from server object
 			    RInterface stub = (RInterface) UnicastRemoteObject.exportObject(obj, 0);
 	
 			    // Bind the remote object's stub in the registry
-			    String binding = "R" + Integer.toString(noServers);
+			    String binding = "R" + Integer.toString(i+1);
 			    registry.bind(binding, stub);
-			    servers[i] = binding;
-			    // Write ready message to console
+			    bindings[i] = binding;
+			    obj.setId(i);
+			    
 			    System.err.println("Replicant " + binding + " ready at port " + Integer.toString(10000));
 			}
-			replicants = servers;
+			
+			for(int i = 0;i < bindings.length;i++) {
+				servers[i].setAvailBindings(bindings);
+			}
 		} catch (Exception e) {
 		    System.err.println("Replicant exception: " + e.toString());
 		    e.printStackTrace();
 		}
+		
+		Runnable r = new Runnable() {
+	         public void run() {
+	        	 try {
+	        		 while(true) { // keep looping through in the background
+		        		 Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
+		        		 String[] servers = registry.list();
+		        		 int noServers = servers.length;
+		        		 for(int i=0; i < registry.list().length;i++) {
+		        			 if(servers[i].equals("FE")) {
+		        				 noServers--;
+		        			 }
+		        		 }
+		        		 Status[] states = new Status[noServers];
+		        		 for(int i=0;i < noServers;i++) {
+		        			 String binding = "R" + Integer.toString(i+1);
+		        			 RInterface replicant = (RInterface) registry.lookup(binding);
+		        			 states[i] = replicant.getStatus();
+		        			 
+		        		 }
+		        		 for(int i=0;i < noServers;i++) {
+		        			 if(states[i] == Status.OK) {
+		        				 String binding = "R" + Integer.toString(i+1);
+		        				 RInterface replicant = (RInterface) registry.lookup(binding);
+		        				 replicant.gossipForUpdates(registry, states);
+		        			 }
+		        		 }
+	        			 System.out.println("Successfully gossiped.");
+	        			 Thread.sleep(10000); // wait for arg / 1000 seconds
+	        		 }
+	        	 } catch (Exception e) {
+	     		    System.err.println("Gossip exception: " + e.toString());
+	    		    e.printStackTrace();
+	    		}
+	         }
+	    };
+
+	    new Thread(r).start(); //this line is async - will not wait for the task in runnable to finish
 	}
 	
 	public void readFile(String fileName, String type) {
@@ -110,7 +152,6 @@ public class RServer implements RInterface {
 	public boolean checkForUpdates(int counter, int otherId) {
 		if(this.vectorStamp[otherId] < counter) { //this means that the other replicant has more updates than this server expected, this trusts that the last used replica is up to date with all other replicas - since it served the previous request
 		//note that this replicant could still have updates that the other one does not posess yet
-			this.vectorStamp[otherId] = counter;
 			return true; //need updates
 		}
 		else {
@@ -118,35 +159,86 @@ public class RServer implements RInterface {
 		}
 	}
 	
-	public void applyAvailableUpdates(String[] checkVector) {
+	public void gossipForUpdates(Registry registry, Status[] states) {
 		try {
+			for(int i=0;i < bindingList.length;i++) {
+				RInterface replicant = (RInterface) registry.lookup(bindingList[i]);
+				if(!replicant.equals(this)) {
+					if(states[replicant.getId()] == Status.OK) {
+						if(checkForUpdates(this.vectorStamp[replicant.getId()], replicant.getId())) {
+							this.applyUpdates(replicant);
+							this.vectorStamp[replicant.getId()] = replicant.getVectorStamp()[replicant.getId()];
+						}
+					}
+					// We cannot gossip with a replicant that is not available
+				}
+			}
+		} catch (Exception e) {
+		    System.err.println("Replicant exception: " + e.toString());
+		    e.printStackTrace();
+		}
+	}
+	
+	public void getAvailableUpdates(String[] checkVector) {
+		try {
+			int updatesToGet = Integer.valueOf(checkVector[1]);
+			String updateReplica = checkVector[0];
+			Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 			boolean update = false;
 			if(!checkVector[0].equals("FE")) {
-				int otherId = Integer.valueOf(checkVector[0].substring(1)) - 1; //retrieves the id of the other replicant by separating out the 'R' from the numerical part
-				update = checkForUpdates(Integer.valueOf(checkVector[1]), otherId);
+				int otherId = Integer.valueOf(updateReplica.substring(1)) - 1; //retrieves the id of the other replicant by separating out the 'R' from the numerical part
+				update = checkForUpdates(updatesToGet, otherId);
+			}
+			else {
+				String[] servers = registry.list();
+				int noServers = servers.length - 1;
+	       		for(int i=0;i < noServers;i++) {
+	       			String binding = "R" + Integer.toString(i+1);
+	       			RInterface replicant = (RInterface) registry.lookup(binding);
+	       			if(!replicant.equals(this)) {
+		       			while(replicant.getStatus() == Status.OFFLINE) { //since updating like this is high priority we still go through even if the server is overloaded
+							Thread.sleep(100); //We have to wait until the server is back up again
+						}
+	       				updatesToGet = replicant.getVectorStamp()[replicant.getId()];
+	       				if(checkForUpdates(updatesToGet, i)) {
+		       				applyUpdates(replicant);
+		       				this.vectorStamp[replicant.getId()] = updatesToGet;
+	       				}
+	       			}
+	       		}
 			}
 			if(update) {
-				Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
-				RInterface replicant = (RInterface) registry.lookup(checkVector[0]);
+				RInterface replicant = (RInterface) registry.lookup(updateReplica);
 				while(replicant.getStatus() == Status.OFFLINE) { //since updating like this is high priority we still go through even if the server is overloaded
-					wait(1); //We have to wait until the server is back up again
+					Thread.sleep(100); //We have to wait until the server is back up again
 				}
-				HashMap<List<Integer>, List<String>> otherMap = replicant.getRatings();
-				for (Map.Entry<List<Integer>, List<String>> entry : otherMap.entrySet()) {
-					if(this.ratingsMap.get(entry.getKey()) == null) { //there is an additional entry that must be added
+				applyUpdates(replicant);
+				this.vectorStamp[replicant.getId()] = Integer.valueOf(updatesToGet);
+				
+			}
+		} catch (Exception e) {
+		    System.err.println("Replicant exception: " + e.toString());
+		    e.printStackTrace();
+		}
+	}
+	
+	public void applyUpdates(RInterface replicant) {
+		try {
+			HashMap<List<Integer>, List<String>> otherMap = replicant.getRatings();
+			for (Map.Entry<List<Integer>, List<String>> entry : otherMap.entrySet()) {
+				if(this.ratingsMap.get(entry.getKey()) == null) { //there is an additional entry that must be added
+					this.ratingsMap.put(entry.getKey(), entry.getValue());
+					this.vectorStamp[id] = vectorStamp[id] + 1;
+				}
+				else if(this.ratingsMap.get(entry.getKey()) != entry.getValue()) { //a data point has been modified
+					List<String> valuesSelf = this.ratingsMap.get(entry.getKey());
+					long timeStampSelf = Long.parseLong(valuesSelf.get(1));
+					//check to see which copy of data was most recently changed
+					if(timeStampSelf < Long.parseLong(entry.getValue().get(1))) { //the other replicant has more recent data so we update
 						this.ratingsMap.put(entry.getKey(), entry.getValue());
 						this.vectorStamp[id] = vectorStamp[id] + 1;
 					}
-					else if(this.ratingsMap.get(entry.getKey()) != entry.getValue()) { //a data point has been modified
-						List<String> valuesSelf = this.ratingsMap.get(entry.getKey());
-						long timeStampSelf = Long.parseLong(valuesSelf.get(1));
-						//check to see which copy of data was most recently changed
-						if(timeStampSelf < Long.parseLong(entry.getValue().get(1))) { //the other replicant has more recent data so we update
-							this.ratingsMap.put(entry.getKey(), entry.getValue());
-							this.vectorStamp[id] = vectorStamp[id] + 1;
-						}
-						//else we keep our copy of the data
-					}
+					//else we keep our copy of the data
 				}
 			}
 		} catch (Exception e) {
@@ -157,23 +249,23 @@ public class RServer implements RInterface {
 	
 	public String[] getRating(int userID, int movieID, String[] checkVector) {
 		try {
-			applyAvailableUpdates(checkVector);
+			getAvailableUpdates(checkVector);
 			ArrayList<String> movieData = movieMap.get(movieID);
 			if(movieData == null) {
 				String msg = "Error:Specified movie does not exist.";
-				String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+				String[] response = {msg, Integer.toString(vectorStamp[id]), bindingList[id]};
 				return response;
 			}
 			else {
 				List<String> rating = ratingsMap.get(Arrays.asList(userID, movieID));
 				if(rating == null) {
 					String msg = "Error:This rating does not exist.";
-					String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+					String[] response = {msg, Integer.toString(vectorStamp[id]), bindingList[id]};
 					return response;
 				}
 				else {
 					String msg = "Rating by " + Integer.toString(userID) + " for " + movieData.get(0) + " is " + rating.get(0) + " at time " + rating.get(1);
-					String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+					String[] response = {msg, Integer.toString(vectorStamp[id]), bindingList[id]};
 					return response;
 				}
 			}
@@ -186,11 +278,11 @@ public class RServer implements RInterface {
 	
 	public String[] submitRating(int userID, int movieID, String score, String[] checkVector) {
 		try {
-			applyAvailableUpdates(checkVector);
+			//getAvailableUpdates(checkVector);
 			ArrayList<String> movieData = movieMap.get(movieID);
 			if(movieData == null) {
 				String msg = "Error:Specified movie does not exist.";
-				String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+				String[] response = {msg, Integer.toString(vectorStamp[id]), bindingList[id]};
 				return response;
 			}
 			else {
@@ -214,7 +306,7 @@ public class RServer implements RInterface {
 					msg = "Existing rating for " + movieData.get(0) + " by " + Integer.toString(userID) + " updated to score " + score + " at time " + time;
 				}
 				this.vectorStamp[id] = vectorStamp[id] + 1;
-				String[] response = {msg, Integer.toString(vectorStamp[id]), replicants[id]};
+				String[] response = {msg, Integer.toString(vectorStamp[id]), bindingList[id]};
 				return response;
 			}
 		} catch (Exception e) {
@@ -240,8 +332,20 @@ public class RServer implements RInterface {
 		return this.ratingsMap;
 	}
 	
-	public int getID() {
+	public int getId() {
 		return this.id;
+	}
+	
+	public void setId(int id) {
+		this.id = id;
+	}
+	
+	public void setAvailBindings(String[] bindings) {
+		this.bindingList = bindings;
+	}
+	
+	public int[] getVectorStamp() {
+		return this.vectorStamp;
 	}
 }
 

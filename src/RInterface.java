@@ -1,6 +1,7 @@
 import java.rmi.Remote;
 import java.rmi.RemoteException;
-import java.util.ArrayList;
+import java.rmi.registry.Registry;
+
 import java.util.HashMap;
 import java.util.List;
 
@@ -13,5 +14,9 @@ public interface RInterface extends Remote {
 	
 	HashMap<List<Integer>, List<String>> getRatings() throws RemoteException;
 	
-	int getID() throws RemoteException;
+	int getId() throws RemoteException;
+	
+	int[] getVectorStamp() throws RemoteException;
+	
+	void gossipForUpdates(Registry registry, Status[] states) throws RemoteException;
 }

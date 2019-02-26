@@ -26,13 +26,10 @@ public class FEServer implements FEInterface {
 		    // Create remote object stub from server object
 		    FEInterface stub = (FEInterface) UnicastRemoteObject.exportObject(obj, 0);
 
-		    // Get registry
 		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 
-		    // Bind the remote object's stub in the registry
 		    registry.bind("FE", stub);
 		    
-		    // Write ready message to console
 		    System.err.println("Server ready");
 		} catch (Exception e) {
 		    System.err.println("Server exception: " + e.toString());
@@ -56,8 +53,6 @@ public class FEServer implements FEInterface {
 					randInt = rand.nextInt(replicants.length - 1) + 1;
 				}
 				binding = replicants[randInt];
-				//this.replicant = binding;
-				System.err.println(binding);
 				replicant = (RInterface) registry.lookup(binding);
 				availability = replicant.getStatus();
 			}
@@ -101,6 +96,16 @@ public class FEServer implements FEInterface {
 		    e.printStackTrace();
 		}
 		return null;
+	}
+	
+	public void terminate(Registry registry) {
+		try {
+			registry.unbind("FE");
+		} catch (Exception e) {
+			System.err.println("Replicant exception: " + e.toString());
+		    e.printStackTrace();
+		}
+		System.exit(0); // terminates execution of front end
 	}
 }
 
