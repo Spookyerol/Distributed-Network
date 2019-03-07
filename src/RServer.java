@@ -20,8 +20,8 @@ import java.nio.file.Paths;
 
 public class RServer implements RInterface {
 	
-	private HashMap<Integer, ArrayList<String>> movieMap; //movieID, (title, genres)
-	private HashMap<List<Integer>, List<String>> ratingsMap; //(userID, movieID), (rating, time stamp)
+	private HashMap<Integer, ArrayList<String>> movieMap; //stored as movieID, (title, genres)
+	private HashMap<List<Integer>, List<String>> ratingsMap; //stored as (userID, movieID), (rating, time stamp)
 	private int[] updateCounters; //each cell points to a replica that is in the network by index, the number in the cell represents the number of updates that this server thinks the corresponding replicas have
 	private int id; //this index points to the cell in updateCounters that corresponds to this object/server
 	private String[] bindingList;
@@ -34,25 +34,22 @@ public class RServer implements RInterface {
 		readFile("ratings.csv", "ratings");
 	}
 	
+	// Main function that does all the initialization and starts the system
 	public static void main(String args[]) {
 		
 		try {
 			int networkSize = Integer.valueOf(args[0]);
 			String[] bindings = new String[networkSize];
 			RServer[] servers = new RServer[networkSize];
-			
-		    // Get registry
-		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
+						
+		    Registry registry = LocateRegistry.createRegistry(10000);
 			for(int i = 0;i < networkSize;i++) {
 				
-			    // Create server object
 			    RServer obj = new RServer(networkSize);
 			    servers[i] = obj;
 			    
-			    // Create remote object stub from server object
 			    RInterface stub = (RInterface) UnicastRemoteObject.exportObject(obj, 0);
 	
-			    // Bind the remote object's stub in the registry
 			    String binding = "R" + Integer.toString(i+1);
 			    registry.bind(binding, stub);
 			    bindings[i] = binding;
@@ -291,7 +288,7 @@ public class RServer implements RInterface {
 		return null;
 	}
 	
-	// Function to handle data submission which accepts user and movi id as ints and score as string
+	// Function to handle data submission which accepts user and movie id as ints and score as string
 	public String[] submitRating(int userID, int movieID, String score) {
 		try {
 			// Unlike for queries we do not need to check other replicas for updates since those changes are resolved during gossip
@@ -320,10 +317,10 @@ public class RServer implements RInterface {
 				// Set appropriate response message
 				String msg;
 				if(!update) {
-					msg = "New rating by " + Integer.toString(userID) + " submitted for " + movieData.get(0) + " with score " + score + " at time " + time;
+					msg = "New rating by user " + Integer.toString(userID) + " submitted for " + movieData.get(0) + " with score " + score + " at time " + time;
 				}
 				else {
-					msg = "Existing rating for " + movieData.get(0) + " by " + Integer.toString(userID) + " updated to score " + score + " at time " + time;
+					msg = "Existing rating for " + movieData.get(0) + " by user " + Integer.toString(userID) + " updated to score " + score + " at time " + time;
 				}
 				this.updateCounters[id] = updateCounters[id] + 1;
 				String[] response = {msg, Integer.toString(updateCounters[id]), bindingList[id]};
@@ -371,5 +368,3 @@ public class RServer implements RInterface {
 		return this.updateCounters;
 	}
 }
-
-//rmiregistry <port number> on cmd before attempting to run.

@@ -23,7 +23,6 @@ public class Client {
 		    	if(inp.toLowerCase().equals("query")) {
 		    		System.out.println("Provide userID and movieID in format 'userID,movieID'");
 		    		inp = scan.next();
-		    		// Ideally some error handling on input
 		    		String[] input = inp.split(",");
 		    		String resp = stub.getRating(Integer.valueOf(input[0]), Integer.valueOf(input[1]));
 		    		System.out.println(resp);
@@ -31,7 +30,6 @@ public class Client {
 		    	else if(inp.toLowerCase().equals("submit")) {
 		    		System.out.println("Provide userID, movieID and your score in format 'userID,movieID,score'");
 		    		inp = scan.next();
-		    		// Ideally some error handling on input
 		    		String[] input = inp.split(",");
 		    		String resp = stub.submitRating(Integer.valueOf(input[0]), Integer.valueOf(input[1]), input[2]);
 		    		System.out.println(resp);

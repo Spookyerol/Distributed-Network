@@ -19,7 +19,7 @@ public class FEServer implements FEInterface {
 		
 		try {
 		    FEServer obj = new FEServer();
-		    // Create the remote interface with server obj
+		    
 		    FEInterface stub = (FEInterface) UnicastRemoteObject.exportObject(obj, 0);
 		    Registry registry = LocateRegistry.getRegistry("127.0.0.1", 10000);
 		    registry.bind("FE", stub);
@@ -68,7 +68,6 @@ public class FEServer implements FEInterface {
 	public String getRating(int userID, int movieID) {
 		try {
 			RInterface connection = connectToReplica();
-			System.err.println("Last served request from " + replica);
 			// Passes update information about the last visited replica to the current one to check for updates
 			String[] lastVisited = {replica, Integer.toString(latestCounter)};
 			String[] response = connection.getRating(userID, movieID, lastVisited);
@@ -86,7 +85,6 @@ public class FEServer implements FEInterface {
 	public String submitRating(int userID, int movieID, String score) {
 		try {
 			RInterface connection = connectToReplica();
-			System.err.println("Last served request from " + replica);
 			String[] response = connection.submitRating(userID, movieID, score);
 			latestCounter = Integer.valueOf(response[1]);
 			this.replica = response[2];
@@ -103,11 +101,9 @@ public class FEServer implements FEInterface {
 		try {
 			registry.unbind("FE");
 		} catch (Exception e) {
-			System.err.println("replica exception: " + e.toString());
+			System.err.println("Server exception: " + e.toString());
 		    e.printStackTrace();
 		}
 		System.exit(0); // terminates execution of front end
 	}
 }
-
-// rmiregistry <port number> on cmd before attempting to run.
